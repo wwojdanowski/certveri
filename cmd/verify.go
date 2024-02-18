@@ -79,6 +79,8 @@ func verify(cmd *cobra.Command) error {
 func init() {
 	verifyCmd.Flags().String("ca", "", "Certificate Authority")
 	verifyCmd.Flags().String("cert", "", "Certificate")
+	verifyCmd.MarkFlagRequired("ca")
+	verifyCmd.MarkFlagRequired("cert")
 	rootCmd.AddCommand(verifyCmd)
 
 	// Here you will define your flags and configuration settings.
