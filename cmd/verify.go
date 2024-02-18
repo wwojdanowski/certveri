@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/enescakir/emoji"
 	"github.com/spf13/cobra"
 )
 
@@ -70,7 +71,10 @@ func verify(cmd *cobra.Command) error {
 		Intermediates: x509.NewCertPool(),
 	}
 	if _, err := cert.Verify(opts); err != nil {
+		fmt.Printf("%v %s\n", emoji.CrossMark, certFile)
 		return fmt.Errorf("failed to verify certificate: " + err.Error())
+	} else {
+		fmt.Printf("%v %s\n", emoji.CheckMarkButton, certFile)
 	}
 
 	return nil
