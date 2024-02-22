@@ -35,41 +35,34 @@ to quickly create a Cobra application.`,
 	},
 }
 
+func loadCert(path string) (*x509.Certificate, error) {
+	content, _ := os.ReadFile(path)
+	block, _ := pem.Decode([]byte(content))
+	cert, _ := x509.ParseCertificate(block.Bytes)
+	return cert, nil
+}
+
 func verify(cmd *cobra.Command) error {
+	certPool := x509.NewCertPool()
+	intermediatesPool := x509.NewCertPool()
 	ca, _ := cmd.Flags().GetString("ca")
 	certFile, _ := cmd.Flags().GetString("cert")
-	caContent, _ := os.ReadFile(ca)
-	certPool := x509.NewCertPool()
+	intermediateFiles, _ := cmd.Flags().GetStringArray("int")
 
-	if _, err := os.Stat(ca); err != nil {
-		return err
+	caCert, _ := loadCert(ca)
+	for i := 0; i < len(intermediateFiles); i++ {
+		cert, _ := loadCert(intermediateFiles[i])
+		intermediatesPool.AddCert(cert)
 	}
-
-	if _, err := os.Stat(certFile); err != nil {
-		return err
-	}
-
-	if ok := certPool.AppendCertsFromPEM(caContent); !ok {
-		return fmt.Errorf("Failed to load PEM file '%s'", ca)
-	}
-
-	certContent, _ := os.ReadFile(certFile)
-
-	block, _ := pem.Decode([]byte(certContent))
-	if block == nil {
-		return fmt.Errorf("failed to parse certificate PEM")
-	}
-
-	cert, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return fmt.Errorf("failed to parse certificate: " + err.Error())
-	}
+	cert, _ := loadCert(certFile)
+	certPool.AddCert(caCert)
 
 	opts := x509.VerifyOptions{
 		Roots: certPool,
 		// DNSName:       serverName,
-		Intermediates: x509.NewCertPool(),
+		Intermediates: intermediatesPool,
 	}
+
 	if _, err := cert.Verify(opts); err != nil {
 		fmt.Printf("%v %s\n", emoji.CrossMark, certFile)
 		return fmt.Errorf("failed to verify certificate: " + err.Error())
@@ -83,6 +76,7 @@ func verify(cmd *cobra.Command) error {
 func init() {
 	verifyCmd.Flags().String("ca", "", "Certificate Authority")
 	verifyCmd.Flags().String("cert", "", "Certificate")
+	verifyCmd.Flags().StringArray("int", []string{}, "Intermediate certificate, can be more than one")
 	verifyCmd.MarkFlagRequired("ca")
 	verifyCmd.MarkFlagRequired("cert")
 	rootCmd.AddCommand(verifyCmd)
