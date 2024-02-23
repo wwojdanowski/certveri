@@ -35,42 +35,52 @@ to quickly create a Cobra application.`,
 	},
 }
 
-func loadCert(path string) (*x509.Certificate, error) {
+type Certificate struct {
+	*x509.Certificate
+	Path string
+}
+
+func loadCert(path string) (*Certificate, error) {
 	content, _ := os.ReadFile(path)
 	block, _ := pem.Decode([]byte(content))
 	cert, _ := x509.ParseCertificate(block.Bytes)
-	return cert, nil
+	return &Certificate{cert, path}, nil
 }
 
 func verify(cmd *cobra.Command) error {
-	certPool := x509.NewCertPool()
-	intermediatesPool := x509.NewCertPool()
 	ca, _ := cmd.Flags().GetString("ca")
 	certFile, _ := cmd.Flags().GetString("cert")
 	intermediateFiles, _ := cmd.Flags().GetStringArray("int")
 
+	certChain := make(map[string]*Certificate)
+
 	caCert, _ := loadCert(ca)
+
+	certChain[caCert.Subject.CommonName] = caCert
+
 	for i := 0; i < len(intermediateFiles); i++ {
 		cert, _ := loadCert(intermediateFiles[i])
-		intermediatesPool.AddCert(cert)
+		certChain[cert.Subject.CommonName] = cert
 	}
 	cert, _ := loadCert(certFile)
-	certPool.AddCert(caCert)
+	certChain[cert.Subject.CommonName] = cert
+	index := cert
 
-	opts := x509.VerifyOptions{
-		Roots: certPool,
-		// DNSName:       serverName,
-		Intermediates: intermediatesPool,
+	for {
+		issuerCn := index.Issuer.CommonName
+
+		if val, ok := certChain[issuerCn]; ok {
+			fmt.Printf("%v %s\n", emoji.CheckMarkButton, index.Path)
+			if issuerCn == caCert.Subject.CommonName {
+				fmt.Printf("%v %s\n", emoji.CheckMarkButton, caCert.Path)
+				return nil
+			}
+			index = val
+		} else {
+			fmt.Printf("%v %s\n", emoji.CrossMark, index.Path)
+			return fmt.Errorf("failed to verify certificate")
+		}
 	}
-
-	if _, err := cert.Verify(opts); err != nil {
-		fmt.Printf("%v %s\n", emoji.CrossMark, certFile)
-		return fmt.Errorf("failed to verify certificate: " + err.Error())
-	} else {
-		fmt.Printf("%v %s\n", emoji.CheckMarkButton, certFile)
-	}
-
-	return nil
 }
 
 func init() {
