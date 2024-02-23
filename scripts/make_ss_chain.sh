@@ -14,7 +14,7 @@ openssl req -x509 -new -nodes -key $CANAME.key -sha256 -days 1826 -out $CANAME.c
 
 ISSUER=$CANAME
 
-for INTERMEDIATE in 1 2
+for INTERMEDIATE in 1 2 3 4 5
 do
    KEY=intermediate${INTERMEDIATE}
    openssl genrsa -out $KEY.key 4096 
