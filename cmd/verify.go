@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/enescakir/emoji"
 	"github.com/spf13/cobra"
@@ -47,6 +48,14 @@ func loadCert(path string) (*Certificate, error) {
 	return &Certificate{cert, path}, nil
 }
 
+func verifyParticularCertificate(c *Certificate) bool {
+	now := time.Now()
+	if now.Before(c.NotBefore) || now.After(c.NotAfter) {
+		return false
+	}
+	return true
+}
+
 func verify(cmd *cobra.Command) error {
 	ca, _ := cmd.Flags().GetString("ca")
 	certFile, _ := cmd.Flags().GetString("cert")
@@ -70,7 +79,14 @@ func verify(cmd *cobra.Command) error {
 		issuerCn := index.Issuer.CommonName
 
 		if val, ok := certChain[issuerCn]; ok {
-			fmt.Printf("%v %s\n", emoji.CheckMarkButton, index.Path)
+			isFine := verifyParticularCertificate(certChain[index.Subject.CommonName])
+
+			emojis := emoji.CheckMarkButton
+			if !isFine {
+				emojis = emoji.Warning
+			}
+
+			fmt.Printf("%v %s\n", emojis, index.Path)
 			if issuerCn == caCert.Subject.CommonName {
 				fmt.Printf("%v %s\n", emoji.CheckMarkButton, caCert.Path)
 				return nil
