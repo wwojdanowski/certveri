@@ -6,8 +6,10 @@ package cmd
 import (
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/enescakir/emoji"
@@ -48,12 +50,50 @@ func loadCert(path string) (*Certificate, error) {
 	return &Certificate{cert, path}, nil
 }
 
-func verifyParticularCertificate(c *Certificate) bool {
-	now := time.Now()
-	if now.Before(c.NotBefore) || now.After(c.NotAfter) {
-		return false
+type rule func(c *Certificate) error
+
+type validations []error
+
+func (r validations) String() string {
+	var errorStrings []string
+
+	for i := 0; i < len(r); i++ {
+		errorStrings = append(errorStrings, r[i].Error())
 	}
-	return true
+
+	return strings.Join(errorStrings, ", ")
+}
+
+func makeRules() []rule {
+	rules := []rule{
+		func(c *Certificate) error {
+			now := time.Now()
+			if now.Before(c.NotBefore) || now.After(c.NotAfter) {
+				return errors.New("Certificate has expired")
+			}
+			return nil
+		},
+		func(c *Certificate) error {
+			if !c.BasicConstraintsValid || !c.IsCA {
+				return errors.New("Certificate signed by unauthorized issuer")
+			}
+			return nil
+		},
+	}
+	return rules
+}
+
+func verifyParticularCertificate(rules []rule, c *Certificate) (result validations) {
+
+	result = validations{}
+
+	for i := 0; i < len(rules); i++ {
+		r := rules[i]
+		if err := r(c); err != nil {
+			result = append(result, err)
+		}
+	}
+	return
 }
 
 func verify(cmd *cobra.Command) error {
@@ -75,18 +115,23 @@ func verify(cmd *cobra.Command) error {
 	certChain[cert.Subject.CommonName] = cert
 	index := cert
 
+	verificationRules := makeRules()
+
 	for {
 		issuerCn := index.Issuer.CommonName
 
 		if val, ok := certChain[issuerCn]; ok {
-			isFine := verifyParticularCertificate(certChain[index.Subject.CommonName])
+			result := verifyParticularCertificate(verificationRules, certChain[index.Subject.CommonName])
 
 			emojis := emoji.CheckMarkButton
-			if !isFine {
+
+			if len(result) > 0 {
 				emojis = emoji.Warning
+				fmt.Printf("%v %s %s\n", emojis, index.Path, result)
+			} else {
+				fmt.Printf("%v %s\n", emojis, index.Path)
 			}
 
-			fmt.Printf("%v %s\n", emojis, index.Path)
 			if issuerCn == caCert.Subject.CommonName {
 				fmt.Printf("%v %s\n", emoji.CheckMarkButton, caCert.Path)
 				return nil
