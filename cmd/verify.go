@@ -81,6 +81,12 @@ func makeRules() []rule {
 			}
 			return nil
 		},
+		func(c *Certificate, chain map[string]*Certificate) error {
+			if _, ok := chain[c.Issuer.CommonName]; !ok {
+				return errors.New("Unknown certificate issuer")
+			}
+			return nil
+		},
 	}
 	return rules
 }
@@ -120,28 +126,25 @@ func verify(cmd *cobra.Command) error {
 	verificationRules := makeRules()
 
 	for {
+		result := verifyParticularCertificate(verificationRules, certChain[index.Subject.CommonName], certChain)
+		emojis := emoji.CheckMarkButton
+
+		if len(result) > 0 {
+			emojis = emoji.Warning
+			fmt.Printf("%v %s %s\n", emojis, index.Path, result)
+		} else {
+			fmt.Printf("%v %s\n", emojis, index.Path)
+		}
 		issuerCn := index.Issuer.CommonName
-
 		if val, ok := certChain[issuerCn]; ok {
-			result := verifyParticularCertificate(verificationRules, certChain[index.Subject.CommonName], certChain)
-
-			emojis := emoji.CheckMarkButton
-
-			if len(result) > 0 {
-				emojis = emoji.Warning
-				fmt.Printf("%v %s %s\n", emojis, index.Path, result)
-			} else {
-				fmt.Printf("%v %s\n", emojis, index.Path)
-			}
-
-			if issuerCn == caCert.Subject.CommonName {
-				fmt.Printf("%v %s\n", emoji.CheckMarkButton, caCert.Path)
-				return nil
-			}
 			index = val
 		} else {
-			fmt.Printf("%v %s\n", emoji.CrossMark, index.Path)
+			// fmt.Printf("%v %s\n", emoji.CrossMark, index.Path)
 			return fmt.Errorf("failed to verify certificate")
+		}
+		if issuerCn == caCert.Subject.CommonName {
+			fmt.Printf("%v %s\n", emoji.CheckMarkButton, caCert.Path)
+			return nil
 		}
 	}
 }
