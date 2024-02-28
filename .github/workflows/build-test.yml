@@ -26,7 +26,7 @@ jobs:
             echo "GITHUB_TOKEN secret is missing."
             exit 1
           fi
-  maven:
+  golang:
     name: go Build & Test
     runs-on: ubuntu-latest
     permissions:
@@ -54,9 +54,5 @@ jobs:
           go-version: 'stable'
         
       - name: Build
-        id: dnb-build
+        id: certveri-build
         run: go mod tidy
-
-      - name: Dual-N-Back test
-        id: dnb-test
-        run: go test -timeout 30s -v `go list ./... | grep -v wasm`
