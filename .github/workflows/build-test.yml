@@ -1,0 +1,62 @@
+---
+name: Build and Test
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - '**/*.go'
+
+jobs:
+  check:
+    name: GitHub Prerequisites Check
+    runs-on: ubuntu-latest
+    outputs:
+      has_gh_secrets: ${{ steps.check-gh-key-secret.outputs.declared }}
+    steps:
+      - name: Check for GitHub Secret availability
+        id: check-gh-key-secret
+        shell: bash
+        run: |
+          if [[ ! -z  "${{ secrets.GITHUB_TOKEN }}" ]]; then
+            echo "All secrets are declared."
+            echo "declared=true" >> $GITHUB_OUTPUT;
+          else
+            echo "GITHUB_TOKEN secret is missing."
+            exit 1
+          fi
+  maven:
+    name: go Build & Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    needs: [check]
+    if: |
+      needs.check.outputs.has_gh_secrets
+    env:
+      REPOSITORY_URL: "https://github.com/${{ github.repository }}/packages"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: master
+      - uses: benjlevesque/short-sha@v2.2
+        id: short-sha
+        with:
+          length: 7
+      - run: echo $SHA
+        env:
+          SHA: ${{ steps.short-sha.outputs.sha }}
+      - uses: actions/setup-go@v4
+        with:
+          go-version: 'stable'
+        
+      - name: Build
+        id: dnb-build
+        run: go mod tidy
+
+      - name: Dual-N-Back test
+        id: dnb-test
+        run: go test -timeout 30s -v `go list ./... | grep -v wasm`
