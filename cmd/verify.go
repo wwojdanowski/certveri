@@ -50,7 +50,7 @@ func loadCert(path string) (*Certificate, error) {
 	return &Certificate{cert, path}, nil
 }
 
-type rule func(c *Certificate) error
+type rule func(c *Certificate, chain map[string]*Certificate) error
 
 type validations []error
 
@@ -66,15 +66,17 @@ func (r validations) String() string {
 
 func makeRules() []rule {
 	rules := []rule{
-		func(c *Certificate) error {
+		func(c *Certificate, chain map[string]*Certificate) error {
 			now := time.Now()
 			if now.Before(c.NotBefore) || now.After(c.NotAfter) {
 				return errors.New("Certificate has expired")
 			}
 			return nil
 		},
-		func(c *Certificate) error {
-			if !c.BasicConstraintsValid || !c.IsCA {
+		func(c *Certificate, chain map[string]*Certificate) error {
+			if parent, ok := chain[c.Issuer.CommonName]; !ok {
+				return nil
+			} else if !parent.BasicConstraintsValid || !parent.IsCA {
 				return errors.New("Certificate signed by unauthorized issuer")
 			}
 			return nil
@@ -83,13 +85,13 @@ func makeRules() []rule {
 	return rules
 }
 
-func verifyParticularCertificate(rules []rule, c *Certificate) (result validations) {
+func verifyParticularCertificate(rules []rule, c *Certificate, chain map[string]*Certificate) (result validations) {
 
 	result = validations{}
 
 	for i := 0; i < len(rules); i++ {
 		r := rules[i]
-		if err := r(c); err != nil {
+		if err := r(c, chain); err != nil {
 			result = append(result, err)
 		}
 	}
@@ -121,7 +123,7 @@ func verify(cmd *cobra.Command) error {
 		issuerCn := index.Issuer.CommonName
 
 		if val, ok := certChain[issuerCn]; ok {
-			result := verifyParticularCertificate(verificationRules, certChain[index.Subject.CommonName])
+			result := verifyParticularCertificate(verificationRules, certChain[index.Subject.CommonName], certChain)
 
 			emojis := emoji.CheckMarkButton
 
