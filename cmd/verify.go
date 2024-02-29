@@ -6,8 +6,11 @@ package cmd
 import (
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/enescakir/emoji"
 	"github.com/spf13/cobra"
@@ -24,7 +27,11 @@ Cobra is a CLI library for Go that empowers applications.
 This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		cmd.ParseFlags(args)
+		if err := cmd.ParseFlags(args); err != nil {
+			fmt.Printf("Error parsing the command line flags %v\n", err)
+			return
+
+		}
 		cmd.Flags()
 		err := verify(cmd)
 		if err != nil {
@@ -47,6 +54,60 @@ func loadCert(path string) (*Certificate, error) {
 	return &Certificate{cert, path}, nil
 }
 
+type rule func(c *Certificate, chain map[string]*Certificate) error
+
+type validations []error
+
+func (r validations) String() string {
+	var errorStrings []string
+
+	for i := 0; i < len(r); i++ {
+		errorStrings = append(errorStrings, r[i].Error())
+	}
+
+	return strings.Join(errorStrings, ", ")
+}
+
+func makeRules() []rule {
+	rules := []rule{
+		func(c *Certificate, chain map[string]*Certificate) error {
+			now := time.Now()
+			if now.Before(c.NotBefore) || now.After(c.NotAfter) {
+				return errors.New("Certificate has expired")
+			}
+			return nil
+		},
+		func(c *Certificate, chain map[string]*Certificate) error {
+			if parent, ok := chain[c.Issuer.CommonName]; !ok {
+				return nil
+			} else if !parent.BasicConstraintsValid || !parent.IsCA {
+				return errors.New("Certificate signed by unauthorized issuer")
+			}
+			return nil
+		},
+		func(c *Certificate, chain map[string]*Certificate) error {
+			if _, ok := chain[c.Issuer.CommonName]; !ok {
+				return errors.New("Unknown certificate issuer")
+			}
+			return nil
+		},
+	}
+	return rules
+}
+
+func verifyParticularCertificate(rules []rule, c *Certificate, chain map[string]*Certificate) (result validations) {
+
+	result = validations{}
+
+	for i := 0; i < len(rules); i++ {
+		r := rules[i]
+		if err := r(c, chain); err != nil {
+			result = append(result, err)
+		}
+	}
+	return
+}
+
 func verify(cmd *cobra.Command) error {
 	ca, _ := cmd.Flags().GetString("ca")
 	certFile, _ := cmd.Flags().GetString("cert")
@@ -66,19 +127,28 @@ func verify(cmd *cobra.Command) error {
 	certChain[cert.Subject.CommonName] = cert
 	index := cert
 
-	for {
-		issuerCn := index.Issuer.CommonName
+	verificationRules := makeRules()
 
+	for {
+		result := verifyParticularCertificate(verificationRules, certChain[index.Subject.CommonName], certChain)
+		emojis := emoji.CheckMarkButton
+
+		if len(result) > 0 {
+			emojis = emoji.Warning
+			fmt.Printf("%v %s %s\n", emojis, index.Path, result)
+		} else {
+			fmt.Printf("%v %s\n", emojis, index.Path)
+		}
+		issuerCn := index.Issuer.CommonName
 		if val, ok := certChain[issuerCn]; ok {
-			fmt.Printf("%v %s\n", emoji.CheckMarkButton, index.Path)
-			if issuerCn == caCert.Subject.CommonName {
-				fmt.Printf("%v %s\n", emoji.CheckMarkButton, caCert.Path)
-				return nil
-			}
 			index = val
 		} else {
-			fmt.Printf("%v %s\n", emoji.CrossMark, index.Path)
+			// fmt.Printf("%v %s\n", emoji.CrossMark, index.Path)
 			return fmt.Errorf("failed to verify certificate")
+		}
+		if issuerCn == caCert.Subject.CommonName {
+			fmt.Printf("%v %s\n", emoji.CheckMarkButton, caCert.Path)
+			return nil
 		}
 	}
 }
@@ -87,17 +157,9 @@ func init() {
 	verifyCmd.Flags().String("ca", "", "Certificate Authority")
 	verifyCmd.Flags().String("cert", "", "Certificate")
 	verifyCmd.Flags().StringArray("int", []string{}, "Intermediate certificate, can be more than one")
+	//nolint:errcheck
 	verifyCmd.MarkFlagRequired("ca")
+	//nolint:errcheck
 	verifyCmd.MarkFlagRequired("cert")
 	rootCmd.AddCommand(verifyCmd)
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// verifyCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// verifyCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }
